@@ -113,7 +113,7 @@ function BotBubble({children,loading}){
   </div>;
 }
 
-function ConfirmCard({transaction,categories,onConfirm,onCancel}){
+function ConfirmCard({transaction,categories,savings=[],onConfirm,onCancel}){
   const getCat=id=>categories.find(c=>c.id===id)||categories[categories.length-1];
   const cat=getCat(transaction.category);
   const[editing,setEditing]=useState(false);
@@ -125,8 +125,18 @@ function ConfirmCard({transaction,categories,onConfirm,onCancel}){
       <input value={ed.description} onChange={e=>setEd(x=>({...x,description:e.target.value}))} style={{width:"100%",background:"#1e2a1e",border:"1px solid #2a3a2a",borderRadius:8,padding:"8px 10px",color:"#e8f4e8",fontSize:13,marginBottom:8}}/>
       <input type="number" value={ed.amount} onChange={e=>setEd(x=>({...x,amount:Number(e.target.value)}))} style={{width:"100%",background:"#1e2a1e",border:"1px solid #2a3a2a",borderRadius:8,padding:"8px 10px",color:"#e8f4e8",fontSize:13,marginBottom:8}}/>
       <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8}}>{categories.map(c=><button key={c.id} onClick={()=>setEd(x=>({...x,category:c.id}))} style={{padding:"4px 8px",borderRadius:12,border:ed.category===c.id?`1px solid ${c.color}`:"1px solid transparent",background:ed.category===c.id?c.color+"25":"#1e2a1e",color:ed.category===c.id?c.color:"#6b8f6b",fontSize:11,cursor:"pointer"}}>{c.icon} {c.label}</button>)}</div>
-      {ed.type==="gasto"&&<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,cursor:"pointer",marginBottom:ed.creditCard?8:10}}>
-        <input type="checkbox" checked={!!ed.creditCard} onChange={e=>setEd(x=>({...x,creditCard:e.target.checked,payMonth:e.target.checked?x.payMonth:null}))} style={{accentColor:"#FFE66D"}}/>
+      <div style={{marginBottom:8}}>
+        <div style={{fontSize:10,color:"#6b8f6b",marginBottom:4}}>Cuenta:</div>
+        <select value={ed.account||"Efectivo"} onChange={e=>setEd(x=>({...x,account:e.target.value,creditCard:e.target.value==="TC",payMonth:e.target.value==="TC"?x.payMonth:null}))} style={{width:"100%",background:"#1e2a1e",border:"1px solid #2a3a2a",borderRadius:8,padding:"7px 10px",color:"#e8f4e8",fontSize:13}}>
+          <option value="Efectivo">💵 Efectivo</option>
+          <option value="TC">💳 Tarjeta de crédito (TC)</option>
+          <option value="Davivienda">🏦 Davivienda</option>
+          <option value="BBVA">🏦 BBVA</option>
+          {savings.filter(s=>s.name!=="Davivienda"&&s.name!=="BBVA").map(s=><option key={s.id} value={s.name}>🏦 {s.name}</option>)}
+        </select>
+      </div>
+      {ed.type==="gasto"&&ed.account!=="TC"&&<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,cursor:"pointer",marginBottom:ed.creditCard?8:10}}>
+        <input type="checkbox" checked={!!ed.creditCard} onChange={e=>setEd(x=>({...x,creditCard:e.target.checked,payMonth:e.target.checked?x.payMonth:null,account:e.target.checked?"TC":x.account}))} style={{accentColor:"#FFE66D"}}/>
         <span style={{color:"#FFE66D"}}>💳 Tarjeta de crédito</span>
       </label>}
       {ed.creditCard&&<div style={{marginBottom:10}}>
@@ -150,6 +160,9 @@ function ConfirmCard({transaction,categories,onConfirm,onCancel}){
         </div>
         <div style={{fontSize:18,fontWeight:800,color:transaction.type==="ingreso"?"#a3e6a9":"#FF6B6B"}}>{transaction.type==="ingreso"?"+":"-"}{fmt(transaction.amount)}</div>
       </div>
+      {transaction.account&&<div style={{background:"rgba(78,205,196,0.07)",border:"1px solid rgba(78,205,196,0.2)",borderRadius:10,padding:"6px 10px",marginBottom:8,fontSize:12,color:"#4ECDC4"}}>
+        🏦 Cuenta: <strong>{transaction.account}</strong>
+      </div>}
       {transaction.creditCard&&<div style={{background:"rgba(255,230,100,0.08)",border:"1px solid rgba(255,230,100,0.2)",borderRadius:10,padding:"7px 10px",marginBottom:12,fontSize:12,color:"#FFE66D"}}>
         💳 Tarjeta de crédito · pago en <strong>{transaction.payMonth?ML[parseInt(transaction.payMonth.slice(5))-1]+" "+transaction.payMonth.slice(0,4):"próximo mes"}</strong>
       </div>}
@@ -410,7 +423,26 @@ function App(){
     const r={id:uid(),name:newReminder.name.trim(),amount:parseFloat(newReminder.amount),day:parseInt(newReminder.day),category:newReminder.category};
     saveReminders([...reminders,r]);setNewReminder({name:"",amount:"",day:"1",category:"vivienda"});setShowAddReminder(false);
   }
-  function confirmTx(t){addTx(t);setMsgs(p=>p.map(m=>m.pendingTransaction?.tempId===t.tempId?{...m,confirmed:true,pendingTransaction:null,successText:`✅ ${t.description} · ${t.type==="ingreso"?"+":"-"}${fmt(t.amount)} guardado`}:m));}
+  function confirmTx(t){
+    addTx(t);
+    // Si el gasto sale de una cuenta de ahorro registrada, descontar del saldo
+    if(t.type==="gasto"&&t.account&&t.account!=="Efectivo"&&t.account!=="TC"){
+      const matched=savings.find(s=>s.name.toLowerCase()===t.account.toLowerCase());
+      if(matched){
+        const upd=savings.map(s=>s.id===matched.id?{...s,balance:Math.max(0,s.balance-t.amount)}:s);
+        saveSav(upd);
+      }
+    }
+    // Si es ingreso y menciona una cuenta, sumar al saldo
+    if(t.type==="ingreso"&&t.account&&t.account!=="Efectivo"&&t.account!=="TC"){
+      const matched=savings.find(s=>s.name.toLowerCase()===t.account.toLowerCase());
+      if(matched){
+        const upd=savings.map(s=>s.id===matched.id?{...s,balance:s.balance+t.amount}:s);
+        saveSav(upd);
+      }
+    }
+    setMsgs(p=>p.map(m=>m.pendingTransaction?.tempId===t.tempId?{...m,confirmed:true,pendingTransaction:null,successText:`✅ ${t.description} · ${t.type==="ingreso"?"+":"-"}${fmt(t.amount)} guardado${t.account?" · "+t.account:""}`}:m));
+  }
   function cancelTx(tid){setMsgs(p=>p.map(m=>m.pendingTransaction?.tempId===tid?{...m,cancelled:true,pendingTransaction:null,successText:"❌ Cancelado"}:m));}
 
   function removeMember(id){
@@ -435,7 +467,8 @@ function App(){
     const [y,m]=selMonth.split("-").map(Number);
     const nextM=m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`;
     const res=`Mes actual:${selMonth}. Ingresos:${fmt(totalIng)},Gastos:${fmt(totalGas)},Balance:${fmt(balance)}.`;
-    const sys=`Eres FluxIA, asistente financiero. ${res} IDs categorías: ${catIds}. DEVUELVE SOLO JSON sin markdown:\n- Movimiento→{"action":"register","transaction":{"description":"texto","amount":1234,"type":"gasto|ingreso","category":"id","creditCard":true|false,"payMonth":"YYYY-MM o null"},"reply":"msg corto"}\n- creditCard=true y payMonth="${nextM}" cuando el usuario menciona: TC, tarjeta de crédito, tarjeta, crédito, cuotas, lo pago después, o lo pagaré. Si no menciona TC, creditCard=false y payMonth=null.\n- Pregunta→{"action":"chat","reply":"respuesta"}\n- 15k=15000,1.5M=1500000. SOLO JSON.`;
+    const savNames=savings.map(s=>s.name.toLowerCase()).join(", ");
+    const sys=`Eres FluxIA, asistente financiero. ${res} IDs categorías: ${catIds}. Cuentas registradas: ${savNames||"ninguna"}. DEVUELVE SOLO JSON sin markdown:\n- Movimiento→{"action":"register","transaction":{"description":"texto","amount":1234,"type":"gasto|ingreso","category":"id","creditCard":true|false,"payMonth":"YYYY-MM o null","account":"nombre_cuenta"},"reply":"msg corto"}\n- CUENTA: detecta de cuál cuenta sale el gasto. Si menciona "davivienda"→account:"Davivienda". Si menciona "bbva"→account:"BBVA". Si menciona "efectivo","cash","plata en mano"→account:"Efectivo". Si menciona TC, tarjeta de crédito, tarjeta, crédito, cuotas→account:"TC" Y creditCard=true Y payMonth="${nextM}". Si menciona alguna cuenta registrada (${savNames}), usa ese nombre exacto. Si no menciona cuenta, account:"Efectivo" por defecto.\n- Pregunta→{"action":"chat","reply":"respuesta"}\n- 15k=15000,1.5M=1500000. SOLO JSON.`;
     try{
       const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:sys,messages:[{role:"user",content:text}]})});
       if(!r.ok){const err=await r.json().catch(()=>({}));throw new Error(`HTTP ${r.status}: ${err.error||r.statusText}`);}
@@ -447,7 +480,7 @@ function App(){
       if(parsed.action==="register"&&parsed.transaction){
         const tid=uid();
         const day=String(new Date().getDate()).padStart(2,"0");
-        const t={...parsed.transaction,tempId:tid,date:`${selMonth}-${day}`,creditCard:!!parsed.transaction.creditCard,payMonth:parsed.transaction.payMonth||null};
+        const t={...parsed.transaction,tempId:tid,date:`${selMonth}-${day}`,creditCard:!!parsed.transaction.creditCard,payMonth:parsed.transaction.payMonth||null,account:parsed.transaction.account||"Efectivo"};
         setMsgs(p=>[...p,{id:uid(),role:"bot",text:parsed.reply},{id:uid(),role:"bot",pendingTransaction:t}]);
       }else{setMsgs(p=>[...p,{id:uid(),role:"bot",text:parsed.reply}]);}
     }catch(e){setMsgs(p=>p.filter(m=>m.id!==lid).concat({id:uid(),role:"bot",text:`⚠️ ${e.message}`}));}
@@ -515,7 +548,7 @@ function App(){
                   {msg.role==="bot"&&!msg.pendingTransaction&&<BotBubble loading={msg.loading}>{msg.successText||msg.text}</BotBubble>}
                   {msg.role==="bot"&&msg.pendingTransaction&&(
                     <div style={{marginBottom:10,paddingLeft:36}}>
-                      <ConfirmCard categories={categories} transaction={msg.pendingTransaction} onConfirm={confirmTx} onCancel={()=>cancelTx(msg.pendingTransaction.tempId)}/>
+                      <ConfirmCard categories={categories} savings={savings} transaction={msg.pendingTransaction} onConfirm={confirmTx} onCancel={()=>cancelTx(msg.pendingTransaction.tempId)}/>
                     </div>
                   )}
                 </div>
@@ -611,6 +644,26 @@ function App(){
                 <span style={{fontSize:14,fontWeight:800,color:"#4ECDC4"}}>{fmt(totalSav)}</span>
               </div>}
             </div>
+            {/* Gastos por cuenta */}
+            {(()=>{
+              const byAcc={};
+              curTx.filter(t=>t.type==="gasto").forEach(t=>{const a=t.account||"Efectivo";byAcc[a]=(byAcc[a]||0)+t.amount;});
+              const entries=Object.entries(byAcc).sort((a,b)=>b[1]-a[1]);
+              if(!entries.length)return null;
+              const accColor={"Davivienda":"#FF6B6B","BBVA":"#4ECDC4","TC":"#FFE66D","Efectivo":"#a3e6a9"};
+              return <div style={{...card,marginBottom:12}}>
+                <div style={{fontSize:11,color:"#a3e6a9",fontWeight:600,marginBottom:10}}>Gastos por cuenta</div>
+                {entries.map(([acc,total])=>(
+                  <div key={acc} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
+                    <div style={{display:"flex",alignItems:"center",gap:7}}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:accColor[acc]||"#6b8f6b"}}/>
+                      <span style={{fontSize:12,color:"#c8e8c8"}}>{acc==="TC"?"💳 TC (próx. mes)":acc==="Efectivo"?"💵 "+acc:"🏦 "+acc}</span>
+                    </div>
+                    <span style={{fontSize:13,fontWeight:700,color:accColor[acc]||"#c8e8c8"}}>{fmt(total)}</span>
+                  </div>
+                ))}
+              </div>;
+            })()}
             {/* Proyección */}
             <div style={{...card,border:"1px solid rgba(78,205,196,0.1)"}}>
               <div style={{fontSize:11,color:"#4ECDC4",fontWeight:600,marginBottom:4}}>Proyección de patrimonio</div>
@@ -715,7 +768,7 @@ function App(){
                 <div style={{width:36,height:36,borderRadius:10,background:cat.color+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{cat.icon}</div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:600}}>{t.description}{t.creditCard&&<span style={{fontSize:10,color:"#FFE66D",marginLeft:5}}>💳{isProjected?" TC proyectado":""}</span>}</div>
-                  <div style={{fontSize:10,color:"#3a5a3a",marginTop:1}}>{cat.label} · {t.date}{t.author&&<span style={{color:"#4a6a4a"}}> · {t.author}</span>}</div>
+                  <div style={{fontSize:10,color:"#3a5a3a",marginTop:1}}>{cat.label} · {t.date}{t.account&&<span style={{color:"#4ECDC4"}}> · 🏦 {t.account}</span>}{t.author&&<span style={{color:"#4a6a4a"}}> · {t.author}</span>}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:14,fontWeight:700,color:t.type==="ingreso"?"#a3e6a9":"#FF6B6B"}}>{t.type==="ingreso"?"+":"-"}{fmt(t.amount)}</div>
