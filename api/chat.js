@@ -23,7 +23,7 @@ module.exports = async function handler(req, res) {
   messages.forEach(m => groqMessages.push({ role: m.role, content: m.content }));
 
   const payload = JSON.stringify({
-    model: "llama-3.3-70b-versatile",
+    model: "openai/gpt-oss-20b",
     max_tokens: 400,
     temperature: 0.2,
     messages: groqMessages
