@@ -467,15 +467,37 @@ function App(){
     const [y,m]=selMonth.split("-").map(Number);
     const nextM=m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`;
     const res=`Mes actual:${selMonth}. Ingresos:${fmt(totalIng)},Gastos:${fmt(totalGas)},Balance:${fmt(balance)}.`;
-    const savNames=savings.map(s=>s.name.toLowerCase()).join(", ");
-    const sys=`Eres FluxIA, asistente financiero. ${res} IDs categorías: ${catIds}. Cuentas registradas: ${savNames||"ninguna"}. DEVUELVE SOLO JSON sin markdown:\n- Movimiento→{"action":"register","transaction":{"description":"texto","amount":1234,"type":"gasto|ingreso","category":"id","creditCard":true|false,"payMonth":"YYYY-MM o null","account":"nombre_cuenta"},"reply":"msg corto"}\n- CUENTA: detecta de cuál cuenta sale el gasto. Si menciona "davivienda"→account:"Davivienda". Si menciona "bbva"→account:"BBVA". Si menciona "efectivo","cash","plata en mano"→account:"Efectivo". Si menciona TC, tarjeta de crédito, tarjeta, crédito, cuotas→account:"TC" Y creditCard=true Y payMonth="${nextM}". Si menciona alguna cuenta registrada (${savNames}), usa ese nombre exacto. Si no menciona cuenta, account:"Efectivo" por defecto.\n- Pregunta→{"action":"chat","reply":"respuesta"}\n- 15k=15000,1.5M=1500000. SOLO JSON.`;
+    const savNames=savings.map(s=>s.name).join(", ");
+    const sys=`Eres FluxIA, asistente de finanzas personales colombiano. Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional, sin markdown, sin explicaciones.
+
+CATEGORÍAS DISPONIBLES (usa el ID exacto): ${catIds}
+
+REGLAS:
+1. Si el usuario registra un gasto o ingreso → action:"register"
+2. Si el usuario hace una pregunta → action:"chat"
+3. Abreviaciones: 15k=15000, 1.5M=1500000, 316062=316062 (números sin abreviar se usan tal cual)
+4. CUENTA: si menciona TC, tarjeta, crédito, cuotas → account:"TC", creditCard:true, payMonth:"${nextM}". Si menciona Davivienda → account:"Davivienda". Si menciona BBVA → account:"BBVA". Si menciona efectivo/cash → account:"Efectivo". Sino → account:"Efectivo".
+5. Cuentas registradas del usuario: ${savNames||"ninguna"}.
+
+EJEMPLOS:
+- "mercado 50000 TC" → {"action":"register","transaction":{"description":"Mercado","amount":50000,"type":"gasto","category":"alimentacion","creditCard":true,"payMonth":"${nextM}","account":"TC"},"reply":"Mercado $50.000 con TC, se paga en ${nextM}"}
+- "almuerzo 18k" → {"action":"register","transaction":{"description":"Almuerzo","amount":18000,"type":"gasto","category":"alimentacion","creditCard":false,"payMonth":null,"account":"Efectivo"},"reply":"Almuerzo $18.000 registrado"}
+- "me pagaron 2M" → {"action":"register","transaction":{"description":"Ingreso","amount":2000000,"type":"ingreso","category":"otros","creditCard":false,"payMonth":null,"account":"Efectivo"},"reply":"Ingreso $2.000.000 registrado"}
+
+Contexto mes actual (${selMonth}): Ingresos=${fmt(totalIng)}, Gastos=${fmt(totalGas)}, Balance=${fmt(balance)}.`;
     try{
       const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:sys,messages:[{role:"user",content:text}]})});
       if(!r.ok){const err=await r.json().catch(()=>({}));throw new Error(`HTTP ${r.status}: ${err.error||r.statusText}`);}
       const data=await r.json();
       if(data.error)throw new Error(data.error);
       const raw=data.content?.[0]?.text||"{}";
-      let parsed;try{parsed=JSON.parse(raw.replace(/```json|```/g,"").trim());}catch{parsed={action:"chat",reply:"No entendí. Ej: 'almuerzo 18000'"};}
+      let parsed;
+      try{
+        const clean=raw.replace(/```json|```/g,"").trim();
+        // Extraer el primer objeto JSON si hay texto extra
+        const match=clean.match(/\{[\s\S]*\}/);
+        parsed=JSON.parse(match?match[0]:clean);
+      }catch{parsed={action:"chat",reply:"No entendí. Intenta: 'mercado 50000 TC' o 'almuerzo 18k davivienda'"};}
       setMsgs(p=>p.filter(m=>m.id!==lid));
       if(parsed.action==="register"&&parsed.transaction){
         const tid=uid();
